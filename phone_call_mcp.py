@@ -397,8 +397,6 @@ async def call_tool(name: str, args: dict):
         await proc.wait()
         os.remove(wav)
 
-        await call_tool("phone_filler", {"type": "thinking"})
-
         await asyncio.sleep(0.3)
 
         state = adb("dumpsys telephony.registry | grep mCallState", timeout=5)
@@ -407,7 +405,6 @@ async def call_tool(name: str, args: dict):
                 {"info": {}, "transcript": "", "done": False, "status": "call_ended"},
                 ensure_ascii=False))]
 
-        # Wake source before recording
         if BT_SOURCE:
             subprocess.run(["pactl", "set-source-mute", BT_SOURCE, "0"], capture_output=True)
             subprocess.run(["pactl", "suspend-source", BT_SOURCE, "0"], capture_output=True)
@@ -418,7 +415,11 @@ async def call_tool(name: str, args: dict):
                 {"info": {}, "transcript": "", "done": False, "status": "no_speech"},
                 ensure_ascii=False))]
 
-        transcript = await asr_16khz(wav)
+        # Play filler during ASR processing (caller is waiting)
+        asr_task = asyncio.create_task(asr_16khz(wav))
+        await call_tool("phone_filler", {"type": "thinking"})
+        transcript = await asr_task
+
         if not transcript.strip():
             return [TextContent(type="text", text=json.dumps(
                 {"info": {}, "transcript": "", "done": False, "status": "asr_empty"},
