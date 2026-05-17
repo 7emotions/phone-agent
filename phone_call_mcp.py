@@ -194,11 +194,8 @@ async def call_tool(name: str, args: dict):
         await call_tool("phone_speak", {"text": question})
         await call_tool("phone_filler", {"type": "thinking"})
 
-        if BT_SINK:
-            subprocess.run(["pactl", "set-sink-mute", BT_SINK, "1"], capture_output=True)
+        await asyncio.sleep(0.5)
         wav = await record_vad(20, 0.8)
-        if BT_SINK:
-            subprocess.run(["pactl", "set-sink-mute", BT_SINK, "0"], capture_output=True)
         if not wav:
             return [TextContent(type="text", text=json.dumps({"info": {}, "done": False, "status": "no_speech"}, ensure_ascii=False))]
 
