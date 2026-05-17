@@ -51,16 +51,16 @@ def _get_local_llm():
         return None
 
 # ── Prompt template ──────────────────────────────────────────────────────────
-EXTRACT_PROMPT = """从对话中提取以下信息，只返回JSON，不要解释。
+EXTRACT_PROMPT = """从对话中提取信息，只返回JSON。
 
 {context}
 
-需要提取: {info_keys}
+需要提取的字段: {info_keys}
 
-对话内容: {transcript}
+对话: {transcript}
 
-返回格式:
-{{"info": {{"出席": "是/否", "饮食": "具体内容"}}, "done": true}}"""
+返回JSON格式: {{"info": {{填提取到的字段和值}}, "done": true}}
+不要编造，没提到的信息用空字符串。"""
 
 server = Server("phone-call")
 
@@ -406,6 +406,10 @@ async def call_tool(name: str, args: dict):
                 ensure_ascii=False))]
 
         transcript = await asr_16khz(wav)
+        if not transcript.strip():
+            return [TextContent(type="text", text=json.dumps(
+                {"info": {}, "transcript": "", "done": False, "status": "asr_empty"},
+                ensure_ascii=False))]
         result = extract_info(merged_context, info_keys, transcript)
         result["transcript"] = transcript
         result["status"] = "ok"
