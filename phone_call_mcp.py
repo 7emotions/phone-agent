@@ -109,9 +109,6 @@ def ensure_hsp() -> bool:
     if BT_SINK not in r2.stdout:
         return False
 
-    if BT_SOURCE:
-        subprocess.run(["pactl", "set-source-mute", BT_SOURCE, "1"], capture_output=True)
-
     _unload_loopbacks()
     return True
 
@@ -383,6 +380,7 @@ async def call_tool(name: str, args: dict):
 
         # Wake source before recording
         if BT_SOURCE:
+            subprocess.run(["pactl", "set-source-mute", BT_SOURCE, "0"], capture_output=True)
             subprocess.run(["pactl", "suspend-source", BT_SOURCE, "0"], capture_output=True)
 
         wav = await record_vad(20, 0.8)
