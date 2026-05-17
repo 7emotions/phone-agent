@@ -85,8 +85,14 @@ CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集�
 server = Server("phone-call")
 
 
+def _call_active() -> bool:
+    """True when remote party has actually answered (not just dialing/ringing)."""
+    out = adb("dumpsys telecom", timeout=3)
+    return "SET_ACTIVE" in out or "CSW.sA" in out
+
+
 def _call_state() -> int:
-    """Return highest call state: 0=idle, 1=ringing, 2=active."""
+    """Return highest mCallState: 0=idle, 1=ringing, 2=offhook."""
     out = adb("dumpsys telephony.registry | grep mCallState", timeout=3)
     highest = 0
     for line in out.split("\n"):
@@ -347,7 +353,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
     merged_context = f"{LLM_CONTEXT}\n{call_context}" if call_context else LLM_CONTEXT
 
     for turn in range(1, max_turns + 1):
-        if _call_state() != 2:
+        if not _call_active():
             return {"transcripts": transcripts, "turns": len(transcripts), "status": "call_ended"}
 
         if turn == 1 and skip_opening:
@@ -537,8 +543,8 @@ async def call_tool(name: str, args: dict):
 
         adb(f"am start -a android.intent.action.CALL -d tel:{number}")
         connected = False
-        for _ in range(20):
-            if _call_state() == 2:
+        for _ in range(30):
+            if _call_active():
                 connected = True
                 break
             await asyncio.sleep(1)
@@ -614,7 +620,7 @@ async def call_tool(name: str, args: dict):
 
         await asyncio.sleep(0.3)
 
-        if _call_state() != 2:
+        if not _call_active():
             return [TextContent(type="text", text=json.dumps(
                 {"info": {}, "transcript": "", "done": False, "status": "call_ended"},
                 ensure_ascii=False))]
