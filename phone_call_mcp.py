@@ -341,7 +341,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
         await call_tool("phone_filler", {"type": "thinking"})
         transcript = await asr_task
         if transcript.strip():
-            transcripts.append(transcript)
+            transcripts.append({"agent": action.get("text", ""), "caller": transcript})
 
     return {"transcripts": transcripts, "turns": len(transcripts), "status": "ok"}
 # ASR and Recording
