@@ -18,9 +18,6 @@
         "PHONE_BT_SINK": "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway",
         "PHONE_BT_SOURCE": "bluez_source.F8_AB_82_92_08_76.headset_audio_gateway",
         "PHONE_ADB": "/path/to/adb"
-      }
-    }
-  }
 }
     }
   }
