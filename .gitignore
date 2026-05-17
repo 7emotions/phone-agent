@@ -2,3 +2,4 @@
 *.gguf
 __pycache__/
 .env
+phone_fillers/
