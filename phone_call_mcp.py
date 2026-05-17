@@ -90,24 +90,26 @@ async def asr_16khz(wav_8khz: str) -> str:
 def isolated_llm(info_keys: str, transcript: str) -> dict:
     """Single-turn LLM. Only sees info_keys + transcript. No system context leak."""
     prompt = EXTRACT_PROMPT.replace("{info_keys}", info_keys).replace("{transcript}", transcript)
-    body = json.dumps({
-        "model": "gpt-5.4-mini",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.3, "max_tokens": 256
-    }).encode()
-    req = urllib.request.Request(LLM_URL, data=body, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {LLM_KEY}"
-    })
-    try:
-        resp = urllib.request.urlopen(req, timeout=15)
-        data = json.loads(resp.read())
-        text = data["choices"][0]["message"]["content"].strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-        return json.loads(text)
-    except Exception:
-        return {"info": {}, "done": False}
+    for model in ["gpt-5.2", "gpt-5.4-mini", "gpt-5.4"]:
+        body = json.dumps({
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3, "max_tokens": 256
+        }).encode()
+        req = urllib.request.Request(LLM_URL, data=body, headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {LLM_KEY}"
+        })
+        try:
+            resp = urllib.request.urlopen(req, timeout=15)
+            data = json.loads(resp.read())
+            text = data["choices"][0]["message"]["content"].strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+            return json.loads(text)
+        except Exception:
+            continue
+    return {"info": {}, "done": False}
 
 
 async def record_vad(max_sec: int, silence_sec: float) -> str | None:
