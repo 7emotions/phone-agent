@@ -6,7 +6,7 @@ FILLER_DIR = os.path.join(BASE_DIR, "phone_fillers")
 os.makedirs(FILLER_DIR, exist_ok=True)
 
 FILLERS = {
-    "thinking": "请稍等，让我记录一下。",
+    "thinking": "请稍等，让我思考一下。",
     "timeout": "喂，您还在吗？",
     "ack": "好的，明白了。",
     "repeat": "不好意思，我没听清楚，您能再说一遍吗？",
