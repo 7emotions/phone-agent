@@ -78,9 +78,13 @@ CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集�
 决定下一句说什么，严格返回JSON:
 {{"action": "ask", "text": "你要说的话"}}
 {{"action": "done", "reason": "为什么结束"}}
-对方说"无法回复""不太了解""会转告""稍后联系""帮你记下""我会尽快"等，立即返回done。
-对方明确拒绝或不能参加，接受现实返回done，不要追问。
-对方困惑时用上下文解释，不要反问。信息传达清楚就停。"""
+
+规则:
+- 遇到你不知道的信息，诚实说"这个我不确定，我确认后再回复您"，返回 done，reason 写 "callback: 需要确认XXX后再回电"。
+- 对方问超出你知识范围的问题，不要编造、不要猜测，说不知道并主动提出回电。
+- 对方说"无法回复""不太了解""会转告""稍后联系""帮你记下""我会尽快"等，立即返回done。
+- 对方明确拒绝或不能参加，接受现实返回done，不要追问。
+- 对方困惑时用上下文解释，不要反问。信息传达清楚就停。"""
 
 server = Server("phone-call")
 
@@ -350,6 +354,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
     """Multi-turn autonomous conversation. API LLM drives, returns transcripts."""
     transcripts = []
     collected = {}
+    done_reason = ""
     merged_context = f"{LLM_CONTEXT}\n{call_context}" if call_context else LLM_CONTEXT
 
     for turn in range(1, max_turns + 1):
@@ -378,6 +383,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
             action = {"action": "ask", "text": "你好，我这边想确认一下信息，请问您现在方便吗？"}
 
         if action.get("action") == "done":
+            done_reason = action.get("reason", "")
             break
 
         tts_task = asyncio.create_task(tts_8khz(action.get("text", "")))
@@ -431,7 +437,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
         if len(callers) >= 2 and callers[-1] == callers[-2]:
             break
 
-    return {"transcripts": transcripts, "turns": len(transcripts), "status": "ok"}
+    return {"transcripts": transcripts, "turns": len(transcripts), "status": "ok", "done_reason": done_reason}
 async def _speak_filler_if_slow(asr_task, delay: float = 2.0):
     try:
         await asyncio.wait_for(asyncio.shield(asr_task), timeout=delay)

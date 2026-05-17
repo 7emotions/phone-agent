@@ -33,7 +33,7 @@ phone_speak(text: string)                              → (TTS plays over HSP)
 phone_ask(question: string, info_keys: string, context?: string)
                                                        → {transcript, ...info_fields}
 phone_converse(goal: string, info_keys: string, max_turns?: int, skip_opening?: bool, context?: string)
-                                                       → {transcripts: [{agent, caller}], turns, status}
+                                                       → {transcripts: [{agent, caller}], turns, status, done_reason}
 phone_filler(type: "thinking" | "timeout" | "ack" | "repeat" | "bye")
                                                        → (pre-generated audio plays)
 ```
@@ -170,10 +170,25 @@ phone_converse has a **4-layer stop mechanism**. The conversation ends when ANY 
 
 - `status: "ok"` → conversation completed naturally (layer 1 or 2)
 - `status: "call_ended"` → caller hung up mid-conversation
+- `done_reason: "callback: ..."` → model couldn't answer something and offered to call back. Read the reason for what needs confirming, then tell the user to research it before redialing.
 - `turns: 1` with single transcript → short answer, stop triggered quickly
 - `agent: "(opening from phone_dial)"` → skip_opening was used (opening not shown in transcript)
 
 **After the call, always synthesize:** Read the transcripts, extract the relevant fields, and tell the user what happened in natural language. Don't just dump the raw JSON.
+
+**Callback pattern:** When `done_reason` starts with `"callback:"`, the model encountered something it didn't know. Tell the user: "对话中遇到了未确认的信息，建议确认后回电。" Then show the transcribed conversation so the user can see what needs research.
+
+## Callback Flow
+
+When the model hits unknown information, it will say "这个我不确定，我确认后再回复您" and return `done_reason: "callback: ..."`. As the orchestrating agent, you should:
+
+1. Report the reason to the user
+2. Offer to research the answer (look up database, check calendar, ask user)
+3. When ready, redial with enhanced context:
+```
+phone_dial(number, opening: "您好，刚才关于XXX的问题，我已经确认了...")
+phone_converse(goal: "补充确认XXX", info_keys: "...", context: "刚才回电，补充信息：YYY。")
+```
 
 ## Filler and Timing
 
