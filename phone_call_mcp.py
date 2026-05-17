@@ -63,6 +63,23 @@ EXTRACT_PROMPT = """从对话内容中提取指定字段的信息。
 {{"info": {{"字段1": "提取到的值", "字段2": "提取到的值"}}, "done": true}}
 如果某字段没有明确提到，填"未知"。"""
 
+CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集信息。
+
+{context}
+
+目标: {goal}
+待收集: {info_keys}
+已收集: {collected}
+当前第 {turn}/{max_turns} 轮
+
+对方: {transcript}
+
+决定下一步，严格返回JSON:
+- 继续问: {{"action": "ask", "text": "你要说的话"}}
+- 够了，停: {{"action": "done", "reason": "简短原因"}}
+
+自然对话。不要重复问候。不要编造未说过的信息。"""
+
 server = Server("phone-call")
 
 
@@ -249,7 +266,73 @@ def extract_info(context: str, info_keys: str, transcript: str) -> dict:
     return _api_llm_extract(context, info_keys, transcript)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+def _converse_decide(context, goal, info_keys, collected, transcript, turn, max_turns) -> dict:
+    """Local LLM decides: ask another question or stop."""
+    prompt = CONVERSE_PROMPT.replace("{context}", context).replace(
+        "{goal}", goal).replace("{info_keys}", info_keys).replace(
+        "{collected}", json.dumps(collected, ensure_ascii=False)).replace(
+        "{transcript}", transcript).replace("{turn}", str(turn)).replace(
+        "{max_turns}", str(max_turns))
+
+    llm = _get_local_llm()
+    if llm is None:
+        # Fallback: just stop
+        return {"action": "done", "reason": "no local model"}
+
+    try:
+        resp = llm.create_chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=128, temperature=0.3,
+        )
+        text = resp["choices"][0]["message"]["content"].strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        return json.loads(text)
+    except Exception:
+        return {"action": "done", "reason": "llm error"}
+
+
+async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
+    """Multi-turn autonomous conversation. Local LLM drives, returns transcripts."""
+    transcripts = []
+    collected = {}
+
+    for turn in range(1, max_turns + 1):
+        # LLM decides next action
+        last = transcripts[-1] if transcripts else ""
+        action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected, last, turn, max_turns)
+
+        if action.get("action") == "done":
+            break
+
+        # Speak + record
+        tts_wav = await tts_8khz(action.get("text", ""))
+        if tts_wav:
+            _unload_loopbacks_aggressive()
+            proc = await asyncio.create_subprocess_exec(
+                "paplay", tts_wav, "--device=" + BT_SINK,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+            await proc.wait()
+            os.remove(tts_wav)
+
+        # Check call state
+        state = adb("dumpsys telephony.registry | grep mCallState", timeout=5)
+        if "mCallState=2" not in state:
+            return {"transcripts": transcripts, "turns": len(transcripts), "status": "call_ended"}
+
+        if BT_SOURCE:
+            subprocess.run(["pactl", "set-source-mute", BT_SOURCE, "0"], capture_output=True)
+            subprocess.run(["pactl", "suspend-source", BT_SOURCE, "0"], capture_output=True)
+
+        wav = await record_vad(20, 0.8)
+        if not wav:
+            continue
+
+        transcript = await asr_16khz(wav)
+        if transcript.strip():
+            transcripts.append(transcript)
+
+    return {"transcripts": transcripts, "turns": len(transcripts), "status": "ok"}
 # ASR and Recording
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -318,7 +401,13 @@ async def list_tools():
                  "info_keys": {"type": "string", "description": "Comma-separated info fields, e.g. 出席,饮食"},
                  "context": {"type": "string", "description": "Per-call context. Merged with PHONE_LLM_CONTEXT system preset."}
              }, "required": ["question", "info_keys"]}),
-        Tool(name="phone_filler", description="Play pre-generated filler audio",
+        Tool(name="phone_converse",
+             description="Autonomous multi-turn call. Local LLM drives the conversation, returns all transcripts for agent analysis. No caller text enters agent context.",
+             inputSchema={"type": "object", "properties": {
+                 "goal": {"type": "string", "description": "Conversation goal, e.g. 确认对方是否出席活动"},
+                 "info_keys": {"type": "string", "description": "Comma-separated fields to collect, e.g. 出席,饮食"},
+                 "max_turns": {"type": "integer", "description": "Max conversation turns (default 5)"}
+             }, "required": ["goal", "info_keys"]}),
              inputSchema={"type": "object", "properties": {
                  "type": {"type": "string", "enum": ["thinking", "timeout", "ack", "repeat", "bye"]}
              }, "required": ["type"]}),
@@ -427,6 +516,16 @@ async def call_tool(name: str, args: dict):
         result = extract_info(merged_context, info_keys, transcript)
         result["transcript"] = transcript
         result["status"] = "ok"
+        return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
+
+    elif name == "phone_converse":
+        if not ensure_hsp():
+            return [TextContent(type="text", text=json.dumps(
+                {"transcripts": [], "turns": 0, "status": "bluetooth_disconnected"},
+                ensure_ascii=False))]
+        result = await converse(
+            args["goal"], args["info_keys"],
+            args.get("max_turns", 5))
         return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
 
     elif name == "phone_filler":
