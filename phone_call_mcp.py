@@ -11,9 +11,11 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 ADB = ["adb"]
-BT_CARD = "bluez_card.F8_AB_82_92_08_76"
-BT_SINK = "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway"
+BT_CARD = os.environ.get("PHONE_BT_CARD", "")
+BT_SINK = os.environ.get("PHONE_BT_SINK", "")
 LLM_URL = os.environ.get("PHONE_LLM_URL", "https://api.deepseek.com/v1/chat/completions")
 LLM_KEY = os.environ.get("PHONE_LLM_KEY", "")
 LLM_MODEL = os.environ.get("PHONE_LLM_MODEL", "deepseek-chat")
@@ -114,7 +116,7 @@ def isolated_llm(info_keys: str, transcript: str) -> dict:
 async def record_vad(max_sec: int, silence_sec: float) -> str | None:
     wav = tempfile.mktemp(suffix=".wav")
     proc = await asyncio.create_subprocess_exec(
-        "python3", "/home/ubuntu/.local/share/phone-agent/phone_listen_vad.py",
+            "python3", os.path.join(BASE_DIR, "phone_listen_vad.py"),
         "--max-sec", str(max_sec), "--silence-sec", str(silence_sec),
         "--out", wav, stdout=asyncio.subprocess.DEVNULL)
     await proc.wait()
@@ -200,7 +202,7 @@ async def call_tool(name: str, args: dict):
     elif name == "phone_filler":
         ensure_hsp()
         ft = args["type"]
-        wav = f"/home/ubuntu/.local/share/phone-agent/phone_fillers/{ft}.wav"
+        wav = os.path.join(BASE_DIR, "phone_fillers", f"{ft}.wav")
         if not os.path.exists(wav):
             return [TextContent(type="text", text=f"filler {ft} not found")]
         proc = await asyncio.create_subprocess_exec(

@@ -13,7 +13,7 @@ def main():
     parser.add_argument("--max-sec", type=int, default=30)
     parser.add_argument("--silence-sec", type=float, default=1.5)
     parser.add_argument("--vad-mode", type=int, default=2, choices=[0,1,2,3])
-    parser.add_argument("--device", default="bluez_source.F8_AB_82_92_08_76.headset_audio_gateway")
+    parser.add_argument("--device", default=os.environ.get("PHONE_BT_SOURCE", ""))
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
