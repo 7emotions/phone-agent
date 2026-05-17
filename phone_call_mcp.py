@@ -83,7 +83,17 @@ CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集�
 server = Server("phone-call")
 
 
-def adb(cmd: str, timeout: int = 15) -> str:
+def _call_state() -> int:
+    """Return highest call state: 0=idle, 1=ringing, 2=active."""
+    out = adb("dumpsys telephony.registry | grep mCallState", timeout=3)
+    highest = 0
+    for line in out.split("\n"):
+        if "mCallState=" in line:
+            try:
+                highest = max(highest, int(line.split("=")[1].strip()))
+            except ValueError:
+                pass
+    return highest
     r = subprocess.run(ADB + ["shell", cmd], capture_output=True, text=True, timeout=timeout)
     return r.stdout + r.stderr
 
@@ -298,14 +308,18 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
     collected = {}
 
     for turn in range(1, max_turns + 1):
-        # LLM decides next action
+        if _call_state() != 2:
+            return {"transcripts": transcripts, "turns": len(transcripts), "status": "call_ended"}
+
         last = transcripts[-1] if transcripts else ""
-        action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected, last, turn, max_turns)
+        if last:
+            action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected, last, turn, max_turns)
+        else:
+            action = {"action": "ask", "text": "你好，请问是{goal}吗？".format(goal=goal)}
 
         if action.get("action") == "done":
             break
 
-        # Speak + record
         tts_wav = await tts_8khz(action.get("text", ""))
         if tts_wav:
             _unload_loopbacks_aggressive()
@@ -314,11 +328,6 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
             await proc.wait()
             os.remove(tts_wav)
-
-        # Check call state
-        state = adb("dumpsys telephony.registry | grep mCallState", timeout=5)
-        if "mCallState=2" not in state:
-            return {"transcripts": transcripts, "turns": len(transcripts), "status": "call_ended"}
 
         if BT_SOURCE:
             subprocess.run(["pactl", "set-source-mute", BT_SOURCE, "0"], capture_output=True)
@@ -421,8 +430,7 @@ async def call_tool(name: str, args: dict):
         number = args["number"]
         adb(f"am start -a android.intent.action.CALL -d tel:{number}")
         for _ in range(20):
-            state = adb("dumpsys telephony.registry | grep mCallState")
-            if "mCallState=2" in state:
+            if _call_state() == 2:
                 return [TextContent(type="text", text=f"connected {number}")]
             await asyncio.sleep(1)
         return [TextContent(type="text", text=f"dialing {number}...")]
@@ -432,12 +440,9 @@ async def call_tool(name: str, args: dict):
         return [TextContent(type="text", text="hung up")]
 
     elif name == "phone_check":
-        out = adb("dumpsys telephony.registry | grep mCallState", timeout=5)
-        for line in out.split("\n"):
-            if "mCallState=" in line:
-                s = line.split("=")[1].strip()
-                return [TextContent(type="text", text={"0": "idle", "1": "ringing", "2": "active"}.get(s, s))]
-        return [TextContent(type="text", text="unknown")]
+        s = _call_state()
+        state_map = {0: "idle", 1: "ringing", 2: "active"}
+        return [TextContent(type="text", text=state_map.get(s, str(s)))]
 
     elif name == "phone_speak":
         if not ensure_hsp():
@@ -489,8 +494,7 @@ async def call_tool(name: str, args: dict):
 
         await asyncio.sleep(0.3)
 
-        state = adb("dumpsys telephony.registry | grep mCallState", timeout=5)
-        if "mCallState=2" not in state:
+        if _call_state() != 2:
             return [TextContent(type="text", text=json.dumps(
                 {"info": {}, "transcript": "", "done": False, "status": "call_ended"},
                 ensure_ascii=False))]
