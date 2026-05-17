@@ -407,7 +407,8 @@ async def list_tools():
                  "goal": {"type": "string", "description": "Conversation goal, e.g. 确认对方是否出席活动"},
                  "info_keys": {"type": "string", "description": "Comma-separated fields to collect, e.g. 出席,饮食"},
                  "max_turns": {"type": "integer", "description": "Max conversation turns (default 5)"}
-             }, "required": ["goal", "info_keys"]}),
+              }, "required": ["goal", "info_keys"]}),
+        Tool(name="phone_filler", description="Play pre-generated filler audio",
              inputSchema={"type": "object", "properties": {
                  "type": {"type": "string", "enum": ["thinking", "timeout", "ack", "repeat", "bye"]}
              }, "required": ["type"]}),
