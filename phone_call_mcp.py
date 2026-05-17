@@ -14,8 +14,8 @@ from mcp.types import Tool, TextContent
 ADB = ["adb"]
 BT_CARD = "bluez_card.F8_AB_82_92_08_76"
 BT_SINK = "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway"
-LLM_URL = "https://beecode.cc/v1/chat/completions"
-LLM_KEY = "sk-05f68cec2c75227a80fa4d5ee71a317c2e2e013c58ae5a66fbc5c231c9ee80a2"
+LLM_URL = os.environ.get("PHONE_LLM_URL", "https://api.openai.com/v1/chat/completions")
+LLM_KEY = os.environ.get("PHONE_LLM_KEY", "")
 
 EXTRACT_PROMPT = """从对话文本中提取信息。输出严格 JSON。
 

@@ -110,10 +110,23 @@ filler 是 8kHz PCM WAV，直接播放无需 TTS 生成，零延迟。
     "type": "local",
     "command": ["python3", "/path/to/phone_call_mcp.py"],
     "enabled": true,
-    "timeout": 120000
+    "timeout": 120000,
+    "environment": {
+      "PHONE_LLM_URL": "https://your-proxy/v1/chat/completions",
+      "PHONE_LLM_KEY": "sk-xxx"
+    }
   }
 }
 ```
+
+## 环境变量
+
+| 变量 | 说明 |
+|---|---|
+| `PHONE_LLM_URL` | LLM API 地址（用于 `phone_ask` 的隔离上下文提取） |
+| `PHONE_LLM_KEY` | LLM API 密钥 |
+
+配置方式见上方 OpenCode 配置示例中的 `environment` 字段。
 
 ## MCP 工具
 
@@ -123,8 +136,11 @@ filler 是 8kHz PCM WAV，直接播放无需 TTS 生成，零延迟。
 | `phone_hangup` | — | 挂断 |
 | `phone_check` | — | 查通话状态 |
 | `phone_speak` | `text` | TTS 生成 + 蓝牙注入（2-5s） |
-| `phone_listen` | `max_sec=30`, `silence_sec=0.8` | VAD 录制 + ASR 转写 |
-| `phone_filler` | `type`: thinking/timeout/ack/repeat/bye | 零延迟播预生成垫话 |
+| `phone_ask` | `question`, `info_keys` | 问一个问题，录音+转写+隔离LLM提取，返回JSON |
+| `phone_filler` | `type` | 零延迟播预生成垫话 |
+
+`phone_ask` 是关键安全边界：说话 → 录音 → ASR → **独立 LLM 上下文提取** → 只返回结构化 JSON。
+调用者的原始语音文本不会进入 Agent 的主上下文。
 
 ## Agent 对话模式
 

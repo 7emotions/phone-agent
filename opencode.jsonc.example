@@ -1,12 +1,15 @@
 // 将 phone-call MCP 添加到你现有的 opencode.jsonc 的 mcp 段：
 {
   "mcp": {
-    // ... 现有的 MCP 服务器 ...
     "phone-call": {
       "type": "local",
       "command": ["python3", "/path/to/phone_call_mcp.py"],
       "enabled": true,
-      "timeout": 120000
+      "timeout": 120000,
+      "environment": {
+        "PHONE_LLM_URL": "https://your-openai-proxy/v1/chat/completions",
+        "PHONE_LLM_KEY": "sk-your-key-here"
+      }
     }
   }
 }
