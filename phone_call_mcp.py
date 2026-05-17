@@ -393,6 +393,11 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
         asr_task = asyncio.create_task(asr_16khz(wav))
         transcript = await _speak_filler_if_slow(asr_task)
         if transcript.strip():
+            if any(kw in transcript for kw in ["字幕by", "字幕由", "谢谢观看", "订阅", "一键三连"]):
+                debug_wav = os.path.join(BASE_DIR, "debug_hallucination.wav")
+                import shutil
+                shutil.copy(wav, debug_wav)
+                continue
             transcripts.append({"agent": action.get("text", ""), "caller": transcript})
 
         callers = [t.get("caller", "") for t in transcripts[-2:]]
@@ -591,7 +596,8 @@ async def call_tool(name: str, args: dict):
         asr_task = asyncio.create_task(asr_16khz(wav))
         transcript = await _speak_filler_if_slow(asr_task)
 
-        if not transcript.strip():
+        if not transcript.strip() or any(
+            kw in transcript for kw in ["字幕by", "字幕由", "谢谢观看", "订阅", "一键三连"]):
             return [TextContent(type="text", text=json.dumps(
                 {"info": {}, "transcript": "", "done": False, "status": "asr_empty"},
                 ensure_ascii=False))]
