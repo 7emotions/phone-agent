@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-import subprocess, json, time, os, tempfile, asyncio
+"""MCP server: phone-call with context isolation.
+
+phone_ask() wraps speak+listen+ASR+LLM into one call.
+The LLM runs with isolated context: sees only the question + single transcript.
+Parent agent receives structured JSON, never raw caller text.
+"""
+
+import subprocess, json, time, os, tempfile, asyncio, urllib.request
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
@@ -7,6 +14,16 @@ from mcp.types import Tool, TextContent
 ADB = ["adb"]
 BT_CARD = "bluez_card.F8_AB_82_92_08_76"
 BT_SINK = "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway"
+LLM_URL = "https://beecode.cc/v1/chat/completions"
+LLM_KEY = "sk-05f68cec2c75227a80fa4d5ee71a317c2e2e013c58ae5a66fbc5c231c9ee80a2"
+
+EXTRACT_PROMPT = """从对话文本中提取信息。输出严格 JSON。
+
+需要的信息: {info_keys}
+
+对话: {transcript}
+
+{{"info": {{"字段": "值"}}, "done": true/false}}"""
 
 server = Server("phone-call")
 
@@ -17,7 +34,8 @@ def adb(cmd: str, timeout: int = 15) -> str:
 
 
 def ensure_hsp():
-    subprocess.run(["pactl", "set-card-profile", BT_CARD, "headset_audio_gateway"], capture_output=True)
+    subprocess.run(["pactl", "set-card-profile", BT_CARD, "headset_audio_gateway"],
+                   capture_output=True)
 
 
 def clean_env():
@@ -27,7 +45,6 @@ def clean_env():
             env[k] = v
     env['HF_HUB_OFFLINE'] = '1'
     env['TRANSFORMERS_OFFLINE'] = '1'
-    env['no_proxy'] = '*'
     return env
 
 
@@ -70,26 +87,56 @@ async def asr_16khz(wav_8khz: str) -> str:
     return result
 
 
+def isolated_llm(info_keys: str, transcript: str) -> dict:
+    """Single-turn LLM. Only sees info_keys + transcript. No system context leak."""
+    prompt = EXTRACT_PROMPT.replace("{info_keys}", info_keys).replace("{transcript}", transcript)
+    body = json.dumps({
+        "model": "gpt-5.4-mini",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3, "max_tokens": 256
+    }).encode()
+    req = urllib.request.Request(LLM_URL, data=body, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LLM_KEY}"
+    })
+    try:
+        resp = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(resp.read())
+        text = data["choices"][0]["message"]["content"].strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        return json.loads(text)
+    except Exception:
+        return {"info": {}, "done": False}
+
+
+async def record_vad(max_sec: int, silence_sec: float) -> str | None:
+    wav = tempfile.mktemp(suffix=".wav")
+    proc = await asyncio.create_subprocess_exec(
+        "python3", "/home/ubuntu/phone_listen_vad.py",
+        "--max-sec", str(max_sec), "--silence-sec", str(silence_sec),
+        "--out", wav, stdout=asyncio.subprocess.DEVNULL)
+    await proc.wait()
+    return wav if proc.returncode == 0 and os.path.exists(wav) else None
+
+
 @server.list_tools()
 async def list_tools():
     return [
-        Tool(name="phone_dial", description="Dial a number. If greeting provided, generates TTS before dialing and plays 1s after connect.",
-             inputSchema={"type": "object", "properties": {
-                 "number": {"type": "string"},
-                 "greeting": {"type": "string"}
-             }, "required": ["number"]}),
+        Tool(name="phone_dial", description="Dial a phone number",
+             inputSchema={"type": "object", "properties": {"number": {"type": "string"}}, "required": ["number"]}),
         Tool(name="phone_hangup", description="End current call",
              inputSchema={"type": "object", "properties": {}}),
-        Tool(name="phone_check", description="Check call state (0=idle, 1=ringing, 2=active)",
+        Tool(name="phone_check", description="Check call state",
              inputSchema={"type": "object", "properties": {}}),
-        Tool(name="phone_speak", description="Speak TTS to caller via Bluetooth HSP",
+        Tool(name="phone_speak", description="TTS to caller via HSP",
              inputSchema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}),
-        Tool(name="phone_listen", description="Record caller voice with VAD (stops on silence), then transcribe",
+        Tool(name="phone_ask", description="Ask caller a question, record, transcribe, extract structured info. Isolated LLM context.",
              inputSchema={"type": "object", "properties": {
-                 "max_sec": {"type": "integer", "default": 30},
-                 "silence_sec": {"type": "number", "default": 0.8}
-             }}),
-        Tool(name="phone_filler", description="Play a pre-generated filler audio instantly",
+                 "question": {"type": "string"},
+                 "info_keys": {"type": "string", "description": "Comma-separated info fields, e.g. 出席,饮食"}
+             }, "required": ["question", "info_keys"]}),
+        Tool(name="phone_filler", description="Play pre-generated filler audio",
              inputSchema={"type": "object", "properties": {
                  "type": {"type": "string", "enum": ["thinking", "timeout", "ack", "repeat", "bye"]}
              }, "required": ["type"]}),
@@ -97,33 +144,16 @@ async def list_tools():
 
 
 @server.call_tool()
-async def call_tool(name: str, arguments: dict):
+async def call_tool(name: str, args: dict):
     if name == "phone_dial":
-        ensure_hsp()
-        number = arguments["number"]
-        greeting = arguments.get("greeting", "")
-
-        wav = None
-        if greeting:
-            wav = await tts_8khz(greeting)
-
+        number = args["number"]
         adb(f"am start -a android.intent.action.CALL -d tel:{number}")
-
-        for _ in range(60):
-            state = adb("dumpsys telephony.registry | grep mCallState", timeout=3)
+        for _ in range(20):
+            state = adb("dumpsys telephony.registry | grep mCallState")
             if "mCallState=2" in state:
-                if wav:
-                    await asyncio.sleep(1)
-                    proc = await asyncio.create_subprocess_exec(
-                        "paplay", wav, "--device=" + BT_SINK,
-                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                    await proc.wait()
-                    os.remove(wav)
                 return [TextContent(type="text", text=f"connected {number}")]
-            await asyncio.sleep(0.3)
-        if wav:
-            os.remove(wav)
-        return [TextContent(type="text", text=f"dialing {number}, no answer")]
+            await asyncio.sleep(1)
+        return [TextContent(type="text", text=f"dialing {number}...")]
 
     elif name == "phone_hangup":
         adb("input keyevent KEYCODE_ENDCALL")
@@ -139,7 +169,7 @@ async def call_tool(name: str, arguments: dict):
 
     elif name == "phone_speak":
         ensure_hsp()
-        wav = await tts_8khz(arguments["text"])
+        wav = await tts_8khz(args["text"])
         if not wav:
             return [TextContent(type="text", text="TTS failed")]
         proc = await asyncio.create_subprocess_exec(
@@ -149,26 +179,26 @@ async def call_tool(name: str, arguments: dict):
         os.remove(wav)
         return [TextContent(type="text", text="spoken")]
 
-    elif name == "phone_listen":
+    elif name == "phone_ask":
         ensure_hsp()
-        max_sec = arguments.get("max_sec", 30)
-        silence_sec = arguments.get("silence_sec", 0.8)
-        wav = tempfile.mktemp(suffix=".wav")
-        proc = await asyncio.create_subprocess_exec(
-            "python3", "/home/ubuntu/phone_listen_vad.py",
-            "--max-sec", str(max_sec),
-            "--silence-sec", str(silence_sec),
-            "--out", wav,
-            stdout=asyncio.subprocess.DEVNULL)
-        await proc.wait()
-        if proc.returncode != 0 or not os.path.exists(wav):
-            return [TextContent(type="text", text="(silence)"])
+        question = args["question"]
+        info_keys = args["info_keys"]
+
+        await call_tool("phone_speak", {"text": question})
+        await call_tool("phone_filler", {"type": "thinking"})
+
+        wav = await record_vad(20, 0.8)
+        if not wav:
+            return [TextContent(type="text", text=json.dumps({"info": {}, "done": False, "status": "no_speech"}, ensure_ascii=False))]
+
         transcript = await asr_16khz(wav)
-        return [TextContent(type="text", text=transcript or "(unrecognized)")]
+        result = isolated_llm(info_keys, transcript)
+        result["status"] = "ok"
+        return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
 
     elif name == "phone_filler":
         ensure_hsp()
-        ft = arguments["type"]
+        ft = args["type"]
         wav = f"/home/ubuntu/phone_fillers/{ft}.wav"
         if not os.path.exists(wav):
             return [TextContent(type="text", text=f"filler {ft} not found")]
