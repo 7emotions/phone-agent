@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Pre-generate filler audio clips for phone conversations."""
-import asyncio, subprocess
+import asyncio, subprocess, os
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FILLER_DIR = os.path.join(BASE_DIR, "phone_fillers")
+os.makedirs(FILLER_DIR, exist_ok=True)
 
 FILLERS = {
     "thinking": "请稍等，让我记录一下。",
@@ -11,8 +14,8 @@ FILLERS = {
 }
 
 async def gen_one(key, text):
-    mp3 = f"/home/ubuntu/phone_fillers/{key}.mp3"
-    wav = f"/home/ubuntu/phone_fillers/{key}.wav"
+    mp3 = os.path.join(FILLER_DIR, f"{key}.mp3")
+    wav = os.path.join(FILLER_DIR, f"{key}.wav")
     proc = await asyncio.create_subprocess_exec(
         "edge-tts", "--voice", "zh-CN-XiaoxiaoNeural",
         "--text", text, "--write-media", mp3,
