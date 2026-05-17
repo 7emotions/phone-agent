@@ -78,10 +78,7 @@ CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集�
 决定下一句说什么，严格返回JSON:
 {{"action": "ask", "text": "你要说的话"}}
 {{"action": "done", "reason": "为什么结束"}}
-如果信息收集完毕或对方明确表示稍后联系，返回done。
-
-自然对话。首轮要自报家门。不要重复问候。
-如果对方问到你不知道的信息，诚实说"这个我需要确认一下，稍后给您回电"。不要编造。"""
+对方说"无法回复""不太了解""会转告""稍后联系""帮你记下"等，立即返回done。轮次不重要，信息传达清楚就停。"""
 
 server = Server("phone-call")
 
@@ -362,11 +359,11 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
         if action.get("action") == "done":
             break
 
-        if len(transcripts) >= 2:
-            prev = transcripts[-1].get("caller", "")
-            curr = transcripts[-2].get("caller", "")
-            if prev and curr and len(set(prev) & set(curr)) / max(len(prev), 1) > 0.6:
-                break  # caller repeating themselves, conversation done
+        callers = [t.get("caller", "") for t in transcripts[-2:]]
+        if any(kw in "".join(callers) for kw in ["无法回复", "不太了解", "会转告", "帮你记下", "稍后联系", "我会尽快"]):
+            break
+        if len(callers) >= 2 and callers[-1] == callers[-2]:
+            break
 
         tts_task = asyncio.create_task(tts_8khz(action.get("text", "")))
 
