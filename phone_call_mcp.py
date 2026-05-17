@@ -77,9 +77,10 @@ CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集�
 
 决定下一句说什么，严格返回JSON:
 {{"action": "ask", "text": "你要说的话"}}
+{{"action": "done", "reason": "为什么结束"}}
+如果信息收集完毕或对方明确表示稍后联系，返回done。
 
 自然对话。首轮要自报家门。不要重复问候。
-
 如果对方问到你不知道的信息，诚实说"这个我需要确认一下，稍后给您回电"。不要编造。"""
 
 server = Server("phone-call")
@@ -294,7 +295,7 @@ def _converse_decide(context, goal, info_keys, collected, transcript, turn, max_
 
     llm = _get_local_llm()
     if llm is None:
-        return {"action": "ask", "text": "不好意思我没听清，能再说一遍吗？"}
+        return {"action": "done", "reason": "no local model"}
 
     try:
         resp = llm.create_chat_completion(
@@ -306,13 +307,13 @@ def _converse_decide(context, goal, info_keys, collected, transcript, turn, max_
             text = text.split("\n", 1)[1].rsplit("```", 1)[0]
         return json.loads(text)
     except Exception:
-        return {"action": "ask", "text": "能再说一遍吗？"}
+        return {"action": "done", "reason": "llm error"}
 
 
 def _api_converse_decide(context, goal, info_keys, collected, transcript, turn, max_turns) -> dict:
     """Use DeepSeek API for conversation steering."""
     if not LLM_KEY:
-        return {"action": "ask", "text": "能再说一遍吗？"}
+        return {"action": "done", "reason": "no api key"}
 
     prompt = CONVERSE_PROMPT.replace("{context}", context).replace(
         "{goal}", goal).replace("{info_keys}", info_keys).replace(
@@ -337,7 +338,7 @@ def _api_converse_decide(context, goal, info_keys, collected, transcript, turn, 
             text = text.split("\n", 1)[1].rsplit("```", 1)[0]
         return json.loads(text)
     except Exception:
-        return {"action": "ask", "text": "能再说一遍吗？"}
+        return {"action": "done", "reason": "llm error"}
 
 
 async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: str = "") -> dict:
@@ -357,6 +358,9 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
                 turn, max_turns)
         else:
             action = {"action": "ask", "text": "你好，我这边想确认一下信息，请问您现在方便吗？"}
+
+        if action.get("action") == "done":
+            break
 
         tts_task = asyncio.create_task(tts_8khz(action.get("text", "")))
 
