@@ -40,6 +40,9 @@ def adb(cmd: str, timeout: int = 15) -> str:
 def ensure_hsp():
     subprocess.run(["pactl", "set-card-profile", BT_CARD, "headset_audio_gateway"],
                    capture_output=True)
+    if BT_SOURCE:
+        subprocess.run(["pactl", "set-source-mute", BT_SOURCE, "1"],
+                       capture_output=True)
 
 
 def clean_env():
