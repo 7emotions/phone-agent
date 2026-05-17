@@ -78,7 +78,7 @@ CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集�
 决定下一句说什么，严格返回JSON:
 {{"action": "ask", "text": "你要说的话"}}
 
-自然对话。不要重复问候。不要编造未说过的信息。"""
+自然对话。首轮要自报家门。不要重复问候。不要编造未说过的信息。"""
 
 server = Server("phone-call")
 
@@ -348,10 +348,10 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
             return {"transcripts": transcripts, "turns": len(transcripts), "status": "call_ended"}
 
         last = transcripts[-1] if transcripts else ""
-        if isinstance(last, dict):
-            last = last.get("caller", "")
-        if last:
-            action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected, last, turn, max_turns)
+        if last or CONVERSE_BACKEND == "api":
+            action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected,
+                last.get("caller", "") if isinstance(last, dict) else last,
+                turn, max_turns)
         else:
             action = {"action": "ask", "text": "你好，我这边想确认一下信息，请问您现在方便吗？"}
 
