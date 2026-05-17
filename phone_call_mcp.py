@@ -94,6 +94,9 @@ def _call_state() -> int:
             except ValueError:
                 pass
     return highest
+
+
+def adb(cmd: str, timeout: int = 15) -> str:
     r = subprocess.run(ADB + ["shell", cmd], capture_output=True, text=True, timeout=timeout)
     return r.stdout + r.stderr
 
