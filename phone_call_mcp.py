@@ -80,6 +80,9 @@ def _normalize_result(data: dict) -> dict:
         data = {"info": data, "done": done}
     data.setdefault("done", True)
     return data
+
+
+def _unload_loopbacks():
     r = subprocess.run(["pactl", "list", "short", "modules"], capture_output=True, text=True)
     for line in r.stdout.split("\n"):
         if "module-loopback" in line:
