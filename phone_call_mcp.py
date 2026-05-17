@@ -339,7 +339,7 @@ def _api_converse_decide(context, goal, info_keys, collected, transcript, turn, 
 
 
 async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
-    """Multi-turn autonomous conversation. Local LLM drives, returns transcripts."""
+    """Multi-turn autonomous conversation. API LLM drives, returns transcripts."""
     transcripts = []
     collected = {}
 
@@ -355,7 +355,25 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
         else:
             action = {"action": "ask", "text": "你好，我这边想确认一下信息，请问您现在方便吗？"}
 
-        tts_wav = await tts_8khz(action.get("text", ""))
+        tts_task = asyncio.create_task(tts_8khz(action.get("text", "")))
+
+        filler_done = asyncio.Event()
+        filler_done.set()
+
+        async def _maybe_filler():
+            filler_done.clear()
+            try:
+                await asyncio.wait_for(asyncio.shield(tts_task), timeout=2.0)
+            except asyncio.TimeoutError:
+                await call_tool("phone_filler", {"type": "thinking"})
+            finally:
+                filler_done.set()
+
+        filler_task = asyncio.create_task(_maybe_filler())
+        tts_wav = await tts_task
+        await filler_done.wait()
+        filler_task.cancel()
+
         if tts_wav:
             _unload_loopbacks_aggressive()
             proc = await asyncio.create_subprocess_exec(
@@ -372,7 +390,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
         if not wav:
             continue
 
-        # Play filler during ASR
+        # ASR with filler delay
         asr_task = asyncio.create_task(asr_16khz(wav))
         transcript = await _speak_filler_if_slow(asr_task)
         if transcript.strip():
@@ -399,7 +417,7 @@ async def asr_16khz(wav_8khz: str) -> str:
     await proc.wait()
     os.remove(wav_8khz)
     proc = await asyncio.create_subprocess_exec(
-        "whisper", upsampled, "--model", "tiny", "--language", "zh",
+        "whisper", upsampled, "--model", "small", "--language", "zh",
         "--output_format", "txt", "--output_dir", os.path.dirname(upsampled),
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         env=clean_env())
