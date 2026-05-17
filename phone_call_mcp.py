@@ -355,7 +355,7 @@ async def asr_16khz(wav_8khz: str) -> str:
     await proc.wait()
     os.remove(wav_8khz)
     proc = await asyncio.create_subprocess_exec(
-        "whisper", upsampled, "--model", "small", "--language", "zh",
+        "whisper", upsampled, "--model", "tiny", "--language", "zh",
         "--output_format", "txt", "--output_dir", os.path.dirname(upsampled),
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         env=clean_env())
