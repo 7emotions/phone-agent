@@ -10,9 +10,11 @@
         "PHONE_LLM_URL": "https://api.deepseek.com/chat/completions",
         "PHONE_LLM_KEY": "sk-xxx",
         "PHONE_LLM_MODEL": "deepseek-chat",
-        "PHONE_BT_CARD": "bluez_card.XX_XX_XX_XX_XX_XX",
-        "PHONE_BT_SINK": "bluez_sink.XX_XX_XX_XX_XX_XX.headset_audio_gateway",
-        "PHONE_BT_SOURCE": "bluez_source.XX_XX_XX_XX_XX_XX.headset_audio_gateway"
+        "PHONE_BT_MAC": "F8:AB:82:92:08:76",
+        "PHONE_BT_CARD": "bluez_card.F8_AB_82_92_08_76",
+        "PHONE_BT_SINK": "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway",
+        "PHONE_BT_SOURCE": "bluez_source.F8_AB_82_92_08_76.headset_audio_gateway",
+        "PHONE_ADB": "/path/to/adb"
       }
     }
   }
