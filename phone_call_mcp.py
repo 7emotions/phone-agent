@@ -368,16 +368,6 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
                     kw in transcript for kw in ["字幕by", "字幕由", "谢谢观看", "订阅", "一键三连"]):
                     transcripts.append({"agent": "(opening from phone_dial)", "caller": transcript})
             continue
-            wav = await record_vad(20, 0.8)
-            if wav:
-                asr_task = asyncio.create_task(asr_16khz(wav))
-                transcript = await _speak_filler_if_slow(asr_task)
-                if transcript.strip() and not any(
-                    kw in transcript for kw in ["字幕by", "字幕由", "谢谢观看", "订阅", "一键三连"]):
-                    # Use empty agent text since opening was pre-spoken
-                    transcripts.append({"agent": "", "caller": transcript})
-            last = transcripts[-1] if transcripts else ""
-            continue
 
         last = transcripts[-1] if transcripts else ""
         if last or CONVERSE_BACKEND == "api":
