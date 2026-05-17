@@ -354,6 +354,13 @@ async def call_tool(name: str, args: dict):
         await call_tool("phone_filler", {"type": "thinking"})
 
         await asyncio.sleep(0.5)
+
+        state = adb("dumpsys telephony.registry | grep mCallState", timeout=5)
+        if "mCallState=2" not in state:
+            return [TextContent(type="text", text=json.dumps(
+                {"info": {}, "transcript": "", "done": False, "status": "call_ended"},
+                ensure_ascii=False))]
+
         wav = await record_vad(20, 0.8)
         if not wav:
             return [TextContent(type="text", text=json.dumps(
