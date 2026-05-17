@@ -89,6 +89,22 @@ def _unload_loopbacks():
             mod_id = line.split()[0]
             subprocess.run(["pactl", "unload-module", mod_id], capture_output=True)
 
+def _unload_loopbacks_aggressive():
+    """Unload loopbacks with retry — catches modules auto-created by bluetooth-policy."""
+    import time as _time
+    for _ in range(5):
+        mods_before = subprocess.run(
+            ["pactl", "list", "short", "modules"], capture_output=True, text=True)
+        count_before = mods_before.stdout.count("module-loopback")
+        if count_before == 0:
+            return
+        _unload_loopbacks()
+        _time.sleep(0.05)
+        mods_after = subprocess.run(
+            ["pactl", "list", "short", "modules"], capture_output=True, text=True)
+        if mods_after.stdout.count("module-loopback") == 0:
+            return
+
 
 def ensure_hsp() -> bool:
     r = subprocess.run(["pactl", "list", "sinks", "short"], capture_output=True, text=True)
@@ -326,7 +342,7 @@ async def call_tool(name: str, args: dict):
         wav = await tts_8khz(args["text"])
         if not wav:
             return [TextContent(type="text", text="TTS failed")]
-        _unload_loopbacks()
+        _unload_loopbacks_aggressive()
         proc = await asyncio.create_subprocess_exec(
             "paplay", wav, "--device=" + BT_SINK,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
@@ -361,7 +377,7 @@ async def call_tool(name: str, args: dict):
                 {"info": {}, "transcript": "", "done": False, "status": "tts_failed"},
                 ensure_ascii=False))]
 
-        _unload_loopbacks()
+        _unload_loopbacks_aggressive()
         proc = await asyncio.create_subprocess_exec(
             "paplay", wav, "--device=" + BT_SINK,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
@@ -402,7 +418,7 @@ async def call_tool(name: str, args: dict):
         wav = os.path.join(BASE_DIR, "phone_fillers", f"{ft}.wav")
         if not os.path.exists(wav):
             return [TextContent(type="text", text=f"filler {ft} not found")]
-        _unload_loopbacks()
+        _unload_loopbacks_aggressive()
         proc = await asyncio.create_subprocess_exec(
             "paplay", wav, "--device=" + BT_SINK,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
