@@ -340,7 +340,7 @@ def _api_converse_decide(context, goal, info_keys, collected, transcript, turn, 
         return {"action": "done", "reason": "llm error"}
 
 
-async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: str = "") -> dict:
+async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: str = "", skip_opening: bool = False) -> dict:
     """Multi-turn autonomous conversation. API LLM drives, returns transcripts."""
     transcripts = []
     collected = {}
@@ -350,7 +350,11 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
         if _call_state() != 2:
             return {"transcripts": transcripts, "turns": len(transcripts), "status": "call_ended"}
 
-        last = transcripts[-1] if transcripts else ""
+        if turn == 1 and skip_opening:
+            # Opening was already spoken by phone_dial, go straight to recording
+            last = ""
+        else:
+            last = transcripts[-1] if transcripts else ""
         if last or CONVERSE_BACKEND == "api":
             action = _converse_decide(merged_context, goal, info_keys, collected,
                 last.get("caller", "") if isinstance(last, dict) else last,
@@ -475,8 +479,11 @@ async def record_vad(max_sec: int, silence_sec: float) -> str | None:
 @server.list_tools()
 async def list_tools():
     return [
-        Tool(name="phone_dial", description="Dial a phone number",
-             inputSchema={"type": "object", "properties": {"number": {"type": "string"}}, "required": ["number"]}),
+        Tool(name="phone_dial", description="Dial a phone number. If opening text provided, generates TTS during dialing and plays immediately on connect.",
+             inputSchema={"type": "object", "properties": {
+                 "number": {"type": "string"},
+                 "opening": {"type": "string", "description": "Pre-generated opening text to speak on connect"}
+             }, "required": ["number"]}),
         Tool(name="phone_hangup", description="End current call",
              inputSchema={"type": "object", "properties": {}}),
         Tool(name="phone_check", description="Check call state",
@@ -496,7 +503,8 @@ async def list_tools():
                  "goal": {"type": "string", "description": "Conversation goal, e.g. 确认对方是否出席活动"},
                  "info_keys": {"type": "string", "description": "Comma-separated fields to collect, e.g. 出席,饮食"},
                  "max_turns": {"type": "integer", "description": "Max conversation turns (default 5)"},
-                 "context": {"type": "string", "description": "Per-call context. Merged with PHONE_LLM_CONTEXT system preset."}
+                 "context": {"type": "string", "description": "Per-call context. Merged with PHONE_LLM_CONTEXT system preset."},
+                 "skip_opening": {"type": "boolean", "description": "Skip first turn speak if opening was already done via phone_dial"}
              }, "required": ["goal", "info_keys"]}),
         Tool(name="phone_filler", description="Play pre-generated filler audio",
              inputSchema={"type": "object", "properties": {
@@ -511,12 +519,29 @@ async def call_tool(name: str, args: dict):
         if not ensure_hsp():
             return [TextContent(type="text", text="bluetooth not connected")]
         number = args["number"]
+        opening = args.get("opening", "")
+
+        tts_task = asyncio.create_task(tts_8khz(opening)) if opening else None
+
         adb(f"am start -a android.intent.action.CALL -d tel:{number}")
+        connected = False
         for _ in range(20):
             if _call_state() == 2:
-                return [TextContent(type="text", text=f"connected {number}")]
+                connected = True
+                break
             await asyncio.sleep(1)
-        return [TextContent(type="text", text=f"dialing {number}...")]
+
+        if tts_task:
+            wav = await tts_task
+            if wav and connected:
+                _unload_loopbacks_aggressive()
+                proc = await asyncio.create_subprocess_exec(
+                    "paplay", wav, "--device=" + BT_SINK,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await proc.wait()
+                os.remove(wav)
+
+        return [TextContent(type="text", text=f"connected {number}" if connected else f"dialing {number}...")]
 
     elif name == "phone_hangup":
         adb("input keyevent KEYCODE_ENDCALL")
@@ -615,7 +640,8 @@ async def call_tool(name: str, args: dict):
         result = await converse(
             args["goal"], args["info_keys"],
             args.get("max_turns", 5),
-            call_context)
+            call_context,
+            args.get("skip_opening", False))
         return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
 
     elif name == "phone_filler":
