@@ -338,10 +338,11 @@ def _api_converse_decide(context, goal, info_keys, collected, transcript, turn, 
         return {"action": "ask", "text": "能再说一遍吗？"}
 
 
-async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
+async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: str = "") -> dict:
     """Multi-turn autonomous conversation. API LLM drives, returns transcripts."""
     transcripts = []
     collected = {}
+    merged_context = f"{LLM_CONTEXT}\n{call_context}" if call_context else LLM_CONTEXT
 
     for turn in range(1, max_turns + 1):
         if _call_state() != 2:
@@ -349,7 +350,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
 
         last = transcripts[-1] if transcripts else ""
         if last or CONVERSE_BACKEND == "api":
-            action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected,
+            action = _converse_decide(merged_context, goal, info_keys, collected,
                 last.get("caller", "") if isinstance(last, dict) else last,
                 turn, max_turns)
         else:
@@ -479,8 +480,9 @@ async def list_tools():
              inputSchema={"type": "object", "properties": {
                  "goal": {"type": "string", "description": "Conversation goal, e.g. 确认对方是否出席活动"},
                  "info_keys": {"type": "string", "description": "Comma-separated fields to collect, e.g. 出席,饮食"},
-                 "max_turns": {"type": "integer", "description": "Max conversation turns (default 5)"}
-              }, "required": ["goal", "info_keys"]}),
+                 "max_turns": {"type": "integer", "description": "Max conversation turns (default 5)"},
+                 "context": {"type": "string", "description": "Per-call context. Merged with PHONE_LLM_CONTEXT system preset."}
+             }, "required": ["goal", "info_keys"]}),
         Tool(name="phone_filler", description="Play pre-generated filler audio",
              inputSchema={"type": "object", "properties": {
                  "type": {"type": "string", "enum": ["thinking", "timeout", "ack", "repeat", "bye"]}
@@ -593,9 +595,11 @@ async def call_tool(name: str, args: dict):
             return [TextContent(type="text", text=json.dumps(
                 {"transcripts": [], "turns": 0, "status": "bluetooth_disconnected"},
                 ensure_ascii=False))]
+        call_context = args.get("context", "")
         result = await converse(
             args["goal"], args["info_keys"],
-            args.get("max_turns", 5))
+            args.get("max_turns", 5),
+            call_context)
         return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
 
     elif name == "phone_filler":
