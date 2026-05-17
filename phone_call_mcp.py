@@ -13,7 +13,8 @@ from mcp.types import Tool, TextContent
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-ADB = ["adb"]
+ADB_BIN = os.environ.get("PHONE_ADB", os.path.expanduser("~/Android/Sdk/platform-tools/adb"))
+ADB = [ADB_BIN]
 BT_CARD = os.environ.get("PHONE_BT_CARD", "")
 BT_SINK = os.environ.get("PHONE_BT_SINK", "")
 LLM_URL = os.environ.get("PHONE_LLM_URL", "https://api.deepseek.com/v1/chat/completions")
