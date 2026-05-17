@@ -544,12 +544,10 @@ async def call_tool(name: str, args: dict):
         adb(f"am start -a android.intent.action.CALL -d tel:{number}")
         connected = False
         for _ in range(30):
-            if _call_state() == 2:
-                # Off-hook detected, wait 3s for actual answer then play
-                await asyncio.sleep(3)
-                if _call_state() == 2:
-                    connected = True
-                    break
+            out = adb("dumpsys telecom | grep 'state=ACTIVE'", timeout=3)
+            if "state=ACTIVE" in out:
+                connected = True
+                break
             await asyncio.sleep(1)
 
         if tts_task:
