@@ -38,11 +38,24 @@ def adb(cmd: str, timeout: int = 15) -> str:
 
 
 def ensure_hsp() -> bool:
+    # Already connected?
+    r = subprocess.run(["pactl", "list", "sinks", "short"], capture_output=True, text=True)
+    if BT_SINK in r.stdout:
+        return True
+
+    # Try reconnecting
+    subprocess.run(["bluetoothctl", "connect", os.environ.get("PHONE_BT_MAC", "")],
+                   capture_output=True, timeout=10)
+    import time
+    time.sleep(2)
+
+    # Set HSP profile
     r = subprocess.run(["pactl", "set-card-profile", BT_CARD, "headset_audio_gateway"],
                        capture_output=True, text=True)
     if r.returncode != 0:
         return False
-    # Verify the sink actually appeared
+
+    # Verify sink appeared
     r2 = subprocess.run(["pactl", "list", "sinks", "short"], capture_output=True, text=True)
     return BT_SINK in r2.stdout
     if BT_SOURCE:
