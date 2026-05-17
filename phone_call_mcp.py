@@ -374,12 +374,20 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
 
         # Play filler during ASR
         asr_task = asyncio.create_task(asr_16khz(wav))
-        await call_tool("phone_filler", {"type": "thinking"})
-        transcript = await asr_task
+        transcript = await _speak_filler_if_slow(asr_task)
         if transcript.strip():
             transcripts.append({"agent": action.get("text", ""), "caller": transcript})
 
     return {"transcripts": transcripts, "turns": len(transcripts), "status": "ok"}
+async def _speak_filler_if_slow(asr_task, delay: float = 2.0):
+    try:
+        await asyncio.wait_for(asyncio.shield(asr_task), timeout=delay)
+        return await asr_task
+    except asyncio.TimeoutError:
+        await call_tool("phone_filler", {"type": "thinking"})
+        return await asr_task
+
+
 # ASR and Recording
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -549,8 +557,7 @@ async def call_tool(name: str, args: dict):
 
         # Play filler during ASR processing (caller is waiting)
         asr_task = asyncio.create_task(asr_16khz(wav))
-        await call_tool("phone_filler", {"type": "thinking"})
-        transcript = await asr_task
+        transcript = await _speak_filler_if_slow(asr_task)
 
         if not transcript.strip():
             return [TextContent(type="text", text=json.dumps(
