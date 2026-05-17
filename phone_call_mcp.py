@@ -326,6 +326,7 @@ async def call_tool(name: str, args: dict):
         wav = await tts_8khz(args["text"])
         if not wav:
             return [TextContent(type="text", text="TTS failed")]
+        _unload_loopbacks()
         proc = await asyncio.create_subprocess_exec(
             "paplay", wav, "--device=" + BT_SINK,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
@@ -369,6 +370,7 @@ async def call_tool(name: str, args: dict):
         wav = os.path.join(BASE_DIR, "phone_fillers", f"{ft}.wav")
         if not os.path.exists(wav):
             return [TextContent(type="text", text=f"filler {ft} not found")]
+        _unload_loopbacks()
         proc = await asyncio.create_subprocess_exec(
             "paplay", wav, "--device=" + BT_SINK,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
