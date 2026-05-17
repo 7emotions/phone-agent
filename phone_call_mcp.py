@@ -362,7 +362,13 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
             break
 
         callers = [t.get("caller", "") for t in transcripts[-2:]]
-        if any(kw in "".join(callers) for kw in ["无法回复", "不太了解", "会转告", "帮你记下", "稍后联系", "我会尽快"]):
+        if any(kw in "".join(callers) for kw in [
+            "无法回复", "不太了解", "不了解", "转告", "帮你记", "稍后联系",
+            "尽快", "不能参加", "没法参加", "去不了", "不参加", "拒绝",
+            "别再打", "打错", "不认识", "莫名其妙", "挂了吧", "别打了",
+            "不感兴趣", "找错", "不要再联系", "移除", "不方便",
+            "发微信", "回头再说", "先这样", "再说吧", "不续", "没时间",
+        ]):
             break
         if len(callers) >= 2 and callers[-1] == callers[-2]:
             break
