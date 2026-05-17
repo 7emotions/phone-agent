@@ -51,16 +51,17 @@ def _get_local_llm():
         return None
 
 # ── Prompt template ──────────────────────────────────────────────────────────
-EXTRACT_PROMPT = """从对话中提取信息，只返回JSON。
+EXTRACT_PROMPT = """从对话内容中提取指定字段的信息。
 
 {context}
 
-需要提取的字段: {info_keys}
+要提取的字段: {info_keys}
 
 对话: {transcript}
 
-返回JSON格式: {{"info": {{填提取到的字段和值}}, "done": true}}
-不要编造，没提到的信息用空字符串。"""
+严格按JSON格式返回，不要添加任何解释:
+{{"info": {{"字段1": "提取到的值", "字段2": "提取到的值"}}, "done": true}}
+如果某字段没有明确提到，填"未知"。"""
 
 server = Server("phone-call")
 
