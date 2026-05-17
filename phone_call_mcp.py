@@ -74,9 +74,8 @@ CONVERSE_PROMPT = """你在和真人通电话。按目标引导对话、收集�
 
 对方: {transcript}
 
-决定下一步，严格返回JSON:
-- 继续问: {{"action": "ask", "text": "你要说的话"}}
-- 够了，停: {{"action": "done", "reason": "简短原因"}}
+决定下一句说什么，严格返回JSON:
+{{"action": "ask", "text": "你要说的话"}}
 
 自然对话。不要重复问候。不要编造未说过的信息。"""
 
@@ -318,10 +317,7 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
         if last:
             action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected, last, turn, max_turns)
         else:
-            action = {"action": "ask", "text": "你好，请问是{goal}吗？".format(goal=goal)}
-
-        if action.get("action") == "done":
-            break
+            action = {"action": "ask", "text": "你好，我这边想确认一下信息，请问您现在方便吗？"}
 
         tts_wav = await tts_8khz(action.get("text", ""))
         if tts_wav:
@@ -340,7 +336,10 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
         if not wav:
             continue
 
-        transcript = await asr_16khz(wav)
+        # Play filler during ASR
+        asr_task = asyncio.create_task(asr_16khz(wav))
+        await call_tool("phone_filler", {"type": "thinking"})
+        transcript = await asr_task
         if transcript.strip():
             transcripts.append(transcript)
 
