@@ -7,8 +7,9 @@
       "enabled": true,
       "timeout": 120000,
       "environment": {
-        "PHONE_LLM_URL": "https://your-openai-proxy/v1/chat/completions",
-        "PHONE_LLM_KEY": "sk-your-key-here"
+        "PHONE_LLM_URL": "https://your-proxy/v1/chat/completions",
+        "PHONE_LLM_KEY": "sk-xxx",
+        "PHONE_LLM_MODEL": "deepseek-chat"
       }
     }
   }

@@ -14,8 +14,9 @@ from mcp.types import Tool, TextContent
 ADB = ["adb"]
 BT_CARD = "bluez_card.F8_AB_82_92_08_76"
 BT_SINK = "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway"
-LLM_URL = os.environ.get("PHONE_LLM_URL", "https://api.openai.com/v1/chat/completions")
+LLM_URL = os.environ.get("PHONE_LLM_URL", "https://api.deepseek.com/v1/chat/completions")
 LLM_KEY = os.environ.get("PHONE_LLM_KEY", "")
+LLM_MODEL = os.environ.get("PHONE_LLM_MODEL", "deepseek-chat")
 
 EXTRACT_PROMPT = """从对话文本中提取信息。输出严格 JSON。
 
@@ -91,11 +92,11 @@ def isolated_llm(info_keys: str, transcript: str) -> dict:
     """Single-turn LLM. Only sees info_keys + transcript. No system context leak."""
     prompt = EXTRACT_PROMPT.replace("{info_keys}", info_keys).replace("{transcript}", transcript)
     for model in ["gpt-5.2", "gpt-5.4-mini", "gpt-5.4"]:
-        body = json.dumps({
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3, "max_tokens": 256
-        }).encode()
+    body = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3, "max_tokens": 256
+    }).encode()
         req = urllib.request.Request(LLM_URL, data=body, headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {LLM_KEY}"
