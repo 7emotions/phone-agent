@@ -37,9 +37,14 @@ def adb(cmd: str, timeout: int = 15) -> str:
     return r.stdout + r.stderr
 
 
-def ensure_hsp():
-    subprocess.run(["pactl", "set-card-profile", BT_CARD, "headset_audio_gateway"],
-                   capture_output=True)
+def ensure_hsp() -> bool:
+    r = subprocess.run(["pactl", "set-card-profile", BT_CARD, "headset_audio_gateway"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return False
+    # Verify the sink actually appeared
+    r2 = subprocess.run(["pactl", "list", "sinks", "short"], capture_output=True, text=True)
+    return BT_SINK in r2.stdout
     if BT_SOURCE:
         subprocess.run(["pactl", "set-source-mute", BT_SOURCE, "1"],
                        capture_output=True)
@@ -175,7 +180,8 @@ async def call_tool(name: str, args: dict):
         return [TextContent(type="text", text="unknown")]
 
     elif name == "phone_speak":
-        ensure_hsp()
+        if not ensure_hsp():
+            return [TextContent(type="text", text="bluetooth not connected")]
         wav = await tts_8khz(args["text"])
         if not wav:
             return [TextContent(type="text", text="TTS failed")]
@@ -187,7 +193,8 @@ async def call_tool(name: str, args: dict):
         return [TextContent(type="text", text="spoken")]
 
     elif name == "phone_ask":
-        ensure_hsp()
+        if not ensure_hsp():
+            return [TextContent(type="text", text=json.dumps({"info": {}, "done": False, "status": "bluetooth_disconnected"}, ensure_ascii=False))]
         question = args["question"]
         info_keys = args["info_keys"]
 
@@ -205,7 +212,8 @@ async def call_tool(name: str, args: dict):
         return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False))]
 
     elif name == "phone_filler":
-        ensure_hsp()
+        if not ensure_hsp():
+            return [TextContent(type="text", text="bluetooth not connected")]
         ft = args["type"]
         wav = os.path.join(BASE_DIR, "phone_fillers", f"{ft}.wav")
         if not os.path.exists(wav):
