@@ -314,6 +314,8 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
             return {"transcripts": transcripts, "turns": len(transcripts), "status": "call_ended"}
 
         last = transcripts[-1] if transcripts else ""
+        if isinstance(last, dict):
+            last = last.get("caller", "")
         if last:
             action = _converse_decide(LLM_CONTEXT, goal, info_keys, collected, last, turn, max_turns)
         else:
