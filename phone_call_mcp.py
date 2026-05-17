@@ -114,7 +114,7 @@ def isolated_llm(info_keys: str, transcript: str) -> dict:
 async def record_vad(max_sec: int, silence_sec: float) -> str | None:
     wav = tempfile.mktemp(suffix=".wav")
     proc = await asyncio.create_subprocess_exec(
-        "python3", "/home/ubuntu/phone_listen_vad.py",
+        "python3", "/home/ubuntu/.local/share/phone-agent/phone_listen_vad.py",
         "--max-sec", str(max_sec), "--silence-sec", str(silence_sec),
         "--out", wav, stdout=asyncio.subprocess.DEVNULL)
     await proc.wait()
@@ -200,7 +200,7 @@ async def call_tool(name: str, args: dict):
     elif name == "phone_filler":
         ensure_hsp()
         ft = args["type"]
-        wav = f"/home/ubuntu/phone_fillers/{ft}.wav"
+        wav = f"/home/ubuntu/.local/share/phone-agent/phone_fillers/{ft}.wav"
         if not os.path.exists(wav):
             return [TextContent(type="text", text=f"filler {ft} not found")]
         proc = await asyncio.create_subprocess_exec(
