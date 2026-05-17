@@ -473,6 +473,8 @@ async def list_tools():
 @server.call_tool()
 async def call_tool(name: str, args: dict):
     if name == "phone_dial":
+        if not ensure_hsp():
+            return [TextContent(type="text", text="bluetooth not connected")]
         number = args["number"]
         adb(f"am start -a android.intent.action.CALL -d tel:{number}")
         for _ in range(20):
