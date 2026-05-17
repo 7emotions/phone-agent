@@ -375,12 +375,15 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
 
         tts_task = asyncio.create_task(tts_8khz(action.get("text", "")))
 
-        try:
-            tts_wav = await asyncio.wait_for(asyncio.shield(tts_task), timeout=2.0)
-        except asyncio.TimeoutError:
-            filler_task = asyncio.create_task(call_tool("phone_filler", {"type": "thinking"}))
+        if turn == 1:
             tts_wav = await tts_task
-            await filler_task
+        else:
+            try:
+                tts_wav = await asyncio.wait_for(asyncio.shield(tts_task), timeout=2.0)
+            except asyncio.TimeoutError:
+                filler_task = asyncio.create_task(call_tool("phone_filler", {"type": "thinking"}))
+                tts_wav = await tts_task
+                await filler_task
 
         if tts_wav:
             _unload_loopbacks_aggressive()
