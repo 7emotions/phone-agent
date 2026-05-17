@@ -224,3 +224,7 @@ for (const t of result.transcripts) {
 - **whisper tiny**：速度优先，1-3s 转写
 - **零硬编码路径**：全部通过环境变量注入
 - **98% 停止准确率**：184 条多场景对话测试验证
+
+## Agent Skill
+
+`skill-phone-call.md` — OpenCode agent skill for orchestrating phone calls. Teaches agents tool selection, two-step conversation flow, stop mechanism interpretation, and error recovery. Install to `~/.agents/skills/phone-call/SKILL.md`.
