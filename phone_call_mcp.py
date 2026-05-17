@@ -26,7 +26,8 @@ ESPEAK_BIN = os.environ.get("PHONE_ESPEAK_BIN", os.path.expanduser("~/.local/bin
 TTS_BACKEND = os.environ.get("PHONE_TTS_BACKEND", "espeak")  # "espeak" or "edge"
 
 # ── LLM config ───────────────────────────────────────────────────────────────
-LLM_BACKEND = os.environ.get("PHONE_LLM_BACKEND", "local")  # "local" or "api"
+LLM_BACKEND = os.environ.get("PHONE_LLM_BACKEND", "local")
+CONVERSE_BACKEND = os.environ.get("PHONE_CONVERSE_BACKEND", "api")
 LOCAL_MODEL = os.environ.get("PHONE_LOCAL_MODEL",
     os.path.join(BASE_DIR, "qwen2.5-0.5b-instruct-q4_k_m.gguf"))
 LLM_URL = os.environ.get("PHONE_LLM_URL", "https://api.deepseek.com/chat/completions")
@@ -279,7 +280,10 @@ def extract_info(context: str, info_keys: str, transcript: str) -> dict:
 
 
 def _converse_decide(context, goal, info_keys, collected, transcript, turn, max_turns) -> dict:
-    """Local LLM decides: ask another question or stop."""
+    """Decide next action. Uses API for quality, falls back to local."""
+    if CONVERSE_BACKEND == "api":
+        return _api_converse_decide(context, goal, info_keys, collected, transcript, turn, max_turns)
+
     prompt = CONVERSE_PROMPT.replace("{context}", context).replace(
         "{goal}", goal).replace("{info_keys}", info_keys).replace(
         "{collected}", json.dumps(collected, ensure_ascii=False)).replace(
@@ -288,8 +292,7 @@ def _converse_decide(context, goal, info_keys, collected, transcript, turn, max_
 
     llm = _get_local_llm()
     if llm is None:
-        # Fallback: just stop
-        return {"action": "done", "reason": "no local model"}
+        return {"action": "ask", "text": "不好意思我没听清，能再说一遍吗？"}
 
     try:
         resp = llm.create_chat_completion(
@@ -301,7 +304,38 @@ def _converse_decide(context, goal, info_keys, collected, transcript, turn, max_
             text = text.split("\n", 1)[1].rsplit("```", 1)[0]
         return json.loads(text)
     except Exception:
-        return {"action": "done", "reason": "llm error"}
+        return {"action": "ask", "text": "能再说一遍吗？"}
+
+
+def _api_converse_decide(context, goal, info_keys, collected, transcript, turn, max_turns) -> dict:
+    """Use DeepSeek API for conversation steering."""
+    if not LLM_KEY:
+        return {"action": "ask", "text": "能再说一遍吗？"}
+
+    prompt = CONVERSE_PROMPT.replace("{context}", context).replace(
+        "{goal}", goal).replace("{info_keys}", info_keys).replace(
+        "{collected}", json.dumps(collected, ensure_ascii=False)).replace(
+        "{transcript}", transcript).replace("{turn}", str(turn)).replace(
+        "{max_turns}", str(max_turns))
+
+    body = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3, "max_tokens": 128
+    }).encode()
+    req = urllib.request.Request(LLM_URL, data=body, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LLM_KEY}"
+    })
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        text = data["choices"][0]["message"]["content"].strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+        return json.loads(text)
+    except Exception:
+        return {"action": "ask", "text": "能再说一遍吗？"}
 
 
 async def converse(goal: str, info_keys: str, max_turns: int = 5) -> dict:
