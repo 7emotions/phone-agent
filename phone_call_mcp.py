@@ -350,16 +350,40 @@ async def call_tool(name: str, args: dict):
         if call_context:
             merged_context = f"{LLM_CONTEXT}\n{call_context}" if LLM_CONTEXT else call_context
 
-        await call_tool("phone_speak", {"text": question})
+        # Pre-generate TTS while setting up HSP (parallelize)
+        tts_task = asyncio.create_task(tts_8khz(question))
+
+        if not ensure_hsp():
+            return [TextContent(type="text", text=json.dumps(
+                {"info": {}, "transcript": "", "done": False, "status": "bluetooth_disconnected"},
+                ensure_ascii=False))]
+
+        wav = await tts_task
+        if not wav:
+            return [TextContent(type="text", text=json.dumps(
+                {"info": {}, "transcript": "", "done": False, "status": "tts_failed"},
+                ensure_ascii=False))]
+
+        _unload_loopbacks()
+        proc = await asyncio.create_subprocess_exec(
+            "paplay", wav, "--device=" + BT_SINK,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        await proc.wait()
+        os.remove(wav)
+
         await call_tool("phone_filler", {"type": "thinking"})
 
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
 
         state = adb("dumpsys telephony.registry | grep mCallState", timeout=5)
         if "mCallState=2" not in state:
             return [TextContent(type="text", text=json.dumps(
                 {"info": {}, "transcript": "", "done": False, "status": "call_ended"},
                 ensure_ascii=False))]
+
+        # Wake source before recording
+        if BT_SOURCE:
+            subprocess.run(["pactl", "suspend-source", BT_SOURCE, "0"], capture_output=True)
 
         wav = await record_vad(20, 0.8)
         if not wav:
