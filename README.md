@@ -1,104 +1,73 @@
 # Phone Agent — AI 打电话能力 for OpenCode
 
-让 OpenCode Agent 获得**真实电话通话能力**。蓝牙 HSP + 本地 TTS + 本地 LLM + VAD + 上下文隔离。
+让 OpenCode Agent 获得**真实电话通话能力**。蓝牙 HSP + TTS + VAD + ASR + LLM 对话引擎。
 
 ## 架构
 
 ```
-┌─────────────────────────────────────────────────┐
-│               OpenCode Agent                    │
-│  phone_dial / speak / ask(context) / filler     │
-└──────────────────┬──────────────────────────────┘
-                   │ MCP stdio
-┌──────────────────▼──────────────────────────────┐
-│           phone_call_mcp.py                     │
-│  ├─ phone_dial    → ADB 拨号                    │
-│  ├─ phone_hangup  → ADB 挂断                    │
-│  ├─ phone_speak   → espeak-ng(本地TTS) + HSP   │
-│  ├─ phone_ask     → speak+listen+VAD+ASR+LLM    │
-│  │   ├─ 双层上下文 (系统预设 + 调用传入)         │
-│  │   ├─ 本地 LLM (qwen2.5-1.5B GGUF)            │
-│  │   ├─ 返回 transcript + info (agent 可总结)    │
-│  │   └─ 回退: edge-tts / DeepSeek API           │
-│  └─ phone_filler  → 预生成垫话（零延迟）         │
-└──────┬───────────────────────┬──────────────────┘
-       │                       │
-   ┌───▼────┐           ┌──────▼──────┐
-   │  ADB   │           │  蓝牙 HSP    │
-   │ (拨号) │           │ paplay 上行  │
-   └────────┘           │ parecord 下行│
-                        │ 断连自动重连  │
-                        │ 回声自动清理  │
-                        └─────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                    OpenCode Agent                        │
+│  phone_dial / hangup / check / speak / ask / converse    │
+└───────────────────────┬──────────────────────────────────┘
+                        │ MCP stdio
+┌───────────────────────▼──────────────────────────────────┐
+│                 phone_call_mcp.py                        │
+│  ├─ phone_dial       → ADB 拨号 + HSP 自检               │
+│  ├─ phone_hangup     → ADB 挂断                          │
+│  ├─ phone_check      → 通话状态                          │
+│  ├─ phone_speak      → TTS + HSP 播放 + 回声清理         │
+│  ├─ phone_ask        → 单轮: 问→录→ASR→提取→返回        │
+│  ├─ phone_converse   → 多轮: API LLM 驱动自主对话        │
+│  │   ├─ 四层停止机制 (model done > 关键词 > 重复 > max)   │
+│  │   ├─ TTS 延迟2s才播 filler，等 filler 播完才说话       │
+│  │   └─ 返回 {agent: 说的, caller: 回的}[]               │
+│  └─ phone_filler     → 预生成垫话                        │
+└──────┬──────────────────────────┬────────────────────────┘
+       │                          │
+   ┌───▼────┐              ┌──────▼──────┐
+   │  ADB   │              │  蓝牙 HSP    │
+   │ (拨号) │              │ paplay 上行  │
+   └────────┘              │ parecord 下行│
+                           │ 回声5次重试  │
+                           │ 断连自动重连  │
+                           └─────────────┘
 ```
 
 ## 性能
 
-| 环节 | 之前 (云端) | 现在 (本地) |
-|------|------------|------------|
-| TTS 首句 | 2-5s (edge-tts) | **21ms** (espeak-ng) |
-| LLM 提取 | 1-3s (DeepSeek API) | **500ms** (qwen2.5-1.5B) |
-| phone_ask 全流程 | 5-10s | **1-2s** |
+| 环节 | 延迟 |
+|------|------|
+| TTS (edge-tts) | 2-5s（后台并行生成，不阻塞） |
+| ASR (whisper tiny) | 1-3s |
+| LLM 对话决策 (DeepSeek API) | ~1s |
+| phone_converse 单轮 | 5-10s |
 
 ## 硬件要求
 
 - Android 手机（已测试：Xiaomi 22041216C, Android 14, MTK Dimensity 8100）
 - 电脑通过蓝牙 HSP 连接手机（电脑充当"蓝牙耳麦"）
-- 开发者模式 + USB 调试已开启
+- 开发者模式 + USB 调试
 
-## 依赖安装
-
-### 电脑侧
+## 依赖
 
 ```bash
-# Python 依赖
-pip install mcp edge-tts webrtcvad faster-whisper llama-cpp-python
-
-# 系统依赖
+pip install mcp edge-tts webrtcvad llama-cpp-python
 apt install pulseaudio pulseaudio-module-bluetooth ffmpeg
 
-# 本地 TTS（espeak-ng）
-# 方式 1: apt install espeak-ng
-# 方式 2: 从 deb 包提取二进制到 ~/.local/bin/
-wget http://archive.ubuntu.com/ubuntu/pool/universe/e/espeak-ng/espeak-ng_1.50+dfsg-10ubuntu0.1_amd64.deb
-dpkg-deb -x espeak-ng_*.deb /tmp/espeak-extract
-cp /tmp/espeak-extract/usr/bin/espeak-ng ~/.local/bin/
-```
+# whisper（推荐 tiny 模型，快）
+pip install faster-whisper
 
-### 本地 LLM 模型
-
-```bash
-pip install huggingface_hub
-
-# 下载 qwen2.5-1.5B GGUF（~1GB）
-python3 -c "
-from huggingface_hub import hf_hub_download
-hf_hub_download('Qwen/Qwen2.5-1.5B-Instruct-GGUF',
-    filename='qwen2.5-1.5b-instruct-q4_k_m.gguf',
-    local_dir='~/.local/share/phone-agent')
-"
-```
-
-> 国内可用 `HF_ENDPOINT=https://hf-mirror.com` 加速下载。
-
-### 手机侧（可选，调试用）
-
-```bash
-# Termux — 编译 tinyalsa
-pkg install clang make cmake -y
-cd ~/tinyalsa-push/build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
-make tinymix tinycap tinyplay -j$(nproc)
+# 可选：本地 TTS
+# apt install espeak-ng
 ```
 
 ## 蓝牙配对
 
 ```bash
-bluetoothctl pair F8:AB:82:92:08:76   # 替换为你的手机 MAC
+bluetoothctl pair F8:AB:82:92:08:76
 bluetoothctl trust F8:AB:82:92:08:76
+pactl list cards short | grep bluez  # 确认识别
 ```
-
-配对后运行 `pactl list cards short | grep bluez` 确认蓝牙卡被 PulseAudio 识别。
 
 ## 预生成 filler 音频
 
@@ -106,45 +75,34 @@ bluetoothctl trust F8:AB:82:92:08:76
 python3 gen_fillers.py
 ```
 
-生成 5 个 8kHz PCM WAV 垫话，零延迟播放：
-
-| filler | 文本 | 用途 |
-|---|---|---|
-| thinking | 请稍等，让我记录一下 | LLM 思考/ASR 转写中 |
+| filler | 文本 | 触发时机 |
+|--------|------|----------|
+| thinking | 请稍等，让我思考一下。 | TTS 生成超过 2s |
 | timeout | 喂，您还在吗？ | 对方沉默超时 |
-| ack | 好的，明白了 | 确认信息 |
+| ack | 好的，明白了。 | 确认信息 |
 | repeat | 不好意思，我没听清楚… | ASR 低置信度 |
-| bye | 好的，谢谢您，再见 | 结束语 |
+| bye | 好的，谢谢您，再见。 | 结束语 |
 
 ## OpenCode 配置
 
 ```jsonc
-"mcp": {
-  "phone-call": {
-    "type": "local",
-    "command": ["python3", "/path/to/phone_call_mcp.py"],
-    "enabled": true,
-    "timeout": 120000,
-    "environment": {
-      // ── LLM: 本地 GGUF 优先，API 回退 ──
-      "PHONE_LLM_BACKEND": "local",
-      "PHONE_LOCAL_MODEL": "/path/to/qwen2.5-1.5b-instruct-q4_k_m.gguf",
-      "PHONE_LLM_CONTEXT": "你是南京青赋驭境的AI助手。",
-      // API 回退
-      "PHONE_LLM_URL": "https://api.deepseek.com/chat/completions",
-      "PHONE_LLM_KEY": "sk-xxx",
-      "PHONE_LLM_MODEL": "deepseek-chat",
-      // ── TTS: 本地 espeak-ng 优先，edge-tts 回退 ──
-      "PHONE_TTS_BACKEND": "espeak",
-      "PHONE_ESPEAK_BIN": "/path/to/espeak-ng",
-      // ── 蓝牙 HSP ──
-      "PHONE_BT_MAC": "F8:AB:82:92:08:76",
-      "PHONE_BT_CARD": "bluez_card.F8_AB_82_92_08_76",
-      "PHONE_BT_SINK": "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway",
-      "PHONE_BT_SOURCE": "bluez_source.F8_AB_82_92_08_76.headset_audio_gateway",
-      // ── ADB ──
-      "PHONE_ADB": "/path/to/adb"
-    }
+"phone-call": {
+  "type": "local",
+  "command": ["python3", "/path/to/phone_call_mcp.py"],
+  "enabled": true,
+  "timeout": 300000,
+  "environment": {
+    "PHONE_TTS_BACKEND": "edge",
+    "PHONE_CONVERSE_BACKEND": "api",
+    "PHONE_LLM_URL": "https://api.deepseek.com/chat/completions",
+    "PHONE_LLM_KEY": "sk-xxx",
+    "PHONE_LLM_MODEL": "deepseek-chat",
+    "PHONE_LLM_CONTEXT": "你是南京青赋驭境的AI助手。",
+    "PHONE_BT_MAC": "F8:AB:82:92:08:76",
+    "PHONE_BT_CARD": "bluez_card.F8_AB_82_92_08_76",
+    "PHONE_BT_SINK": "bluez_sink.F8_AB_82_92_08_76.headset_audio_gateway",
+    "PHONE_BT_SOURCE": "bluez_source.F8_AB_82_92_08_76.headset_audio_gateway",
+    "PHONE_ADB": "/path/to/adb"
   }
 }
 ```
@@ -154,106 +112,115 @@ python3 gen_fillers.py
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
-|---|---|---|
-| **LLM** |||
-| `PHONE_LLM_BACKEND` | 提取后端：`local` 或 `api` | `local` |
-| `PHONE_LOCAL_MODEL` | GGUF 模型路径 | `./qwen2.5-1.5b-instruct-q4_k_m.gguf` |
-| `PHONE_LLM_CONTEXT` | 系统预设上下文（身份+任务基调） | — |
-| `PHONE_LLM_URL` | API 地址（回退用） | `api.deepseek.com/chat/completions` |
+|------|------|--------|
+| `PHONE_CONVERSE_BACKEND` | 多轮对话后端：`api` / `local` | `api` |
+| `PHONE_LLM_BACKEND` | 提取后端：`local` / `api` | `local` |
+| `PHONE_LLM_CONTEXT` | 系统预设上下文（身份+任务） | — |
+| `PHONE_LLM_URL` | API 地址 | `api.deepseek.com/chat/completions` |
 | `PHONE_LLM_KEY` | API 密钥 | — |
 | `PHONE_LLM_MODEL` | API 模型名 | `deepseek-chat` |
-| **TTS** |||
-| `PHONE_TTS_BACKEND` | TTS 后端：`espeak` 或 `edge` | `espeak` |
-| `PHONE_ESPEAK_BIN` | espeak-ng 二进制路径 | `~/.local/bin/espeak-ng` |
-| **蓝牙** |||
+| `PHONE_TTS_BACKEND` | TTS：`espeak` / `edge` | `edge` |
+| `PHONE_ESPEAK_BIN` | espeak-ng 路径 | `~/.local/bin/espeak-ng` |
 | `PHONE_BT_MAC` | 手机蓝牙 MAC | — |
 | `PHONE_BT_CARD` | PulseAudio 蓝牙卡名 | — |
 | `PHONE_BT_SINK` | HSP 上行 sink | — |
 | `PHONE_BT_SOURCE` | HSP 下行 source | — |
-| **ADB** |||
 | `PHONE_ADB` | adb 路径 | `~/Android/Sdk/platform-tools/adb` |
 
 ## MCP 工具
 
 | 工具 | 参数 | 说明 |
-|---|---|---|
-| `phone_dial` | `number` | 拨号，阻塞直到接通 |
+|------|------|------|
+| `phone_dial` | `number` | 拨号（自动检查 HSP） |
 | `phone_hangup` | — | 挂断 |
-| `phone_check` | — | 查通话状态：idle/ringing/active |
-| `phone_speak` | `text` | TTS 生成 + 蓝牙注入（~21ms） |
-| `phone_ask` | `question`, `info_keys`, `context?` | 问问题 → 录音(VAD) → ASR → **本地 LLM 提取** → 返回 JSON |
-| `phone_filler` | `type`: thinking/timeout/ack/repeat/bye | 零延迟播放预生成垫话 |
+| `phone_check` | — | idle / ringing / active |
+| `phone_speak` | `text` | TTS → HSP |
+| `phone_ask` | `question`, `info_keys`, `context?` | 单轮：问→录→ASR→提取 |
+| **`phone_converse`** | `goal`, `info_keys`, `context?`, `max_turns?` | **多轮自主对话** |
+| `phone_filler` | `type` | 播放垫话 |
 
-### phone_ask — 双层上下文 + transcript 返回
+### phone_converse — 自主多轮对话
 
-`phone_ask` 接受可选的 `context` 参数，与系统预设 `PHONE_LLM_CONTEXT` 合并：
+Agent 只需要描述目标，MCP 内部自动完成整轮对话：
 
+```json
+phone_converse({
+  "goal": "通知王经理周五下午3点会议延期到下周一上午10点",
+  "info_keys": "收到通知",
+  "context": "地点三号会议室不变，确认王经理收到通知即可。",
+  "max_turns": 4
+})
 ```
-系统预设:  "你是南京青赋驭境的AI助手，正在电话确认活动出席"
-调用传入:  "这是第三轮确认，对方之前说可能来"
-合并结果:  "你是南京青赋驭境的AI助手，正在电话确认活动出席\n这是第三轮确认，对方之前说可能来"
-```
 
-返回格式：
+**四层停止机制**：
+
+| 层 | 机制 | 触发条件 |
+|----|------|----------|
+| 1 | API 模型判 done | 信息收集完毕 / 对方拒绝 / 对话完成 |
+| 2 | 关键词触发 | 推脱语（帮你记、打错、稍后联系等） |
+| 3 | 重复检测 | 连续两轮相同回复 |
+| 4 | max_turns | 安全上限 |
+
+**TTS 延迟填补**：录音结束后开始计时，超过 2s 才播 "请稍等" filler。如果 TTS 在 filler 期间完成，等 filler 播完再说话。
+
+**返回格式**：
 
 ```json
 {
-  "info": {"出席": "是", "饮食": "素菜"},
-  "transcript": "我可以来，但是我不吃香菜，素菜就行",
-  "done": true,
+  "transcripts": [
+    {"agent": "请问是王经理吗？会议延期到下周一...", "caller": "好的收到。"}
+  ],
+  "turns": 1,
   "status": "ok"
 }
 ```
 
-`transcript` 字段让 Agent 可以直接基于原始通话内容做总结，不依赖 LLM 提取的准确率。
-
-### 蓝牙自动重连 + 回声清理
-
-每次 `ensure_hsp()` 激活 HSP 时：
-1. 自动 `bluetoothctl connect` 重连
-2. 卸载所有 PulseAudio `module-loopback`（防止 HSP sink→source 数字回声）
-3. 静音 BT_SOURCE 防止本地回放
-
-## Agent 对话模式
+## Agent 调用模式
 
 ```
-phone_dial("13800138000")
+// 模式 1: 简单通知（1-2 轮自动完成）
+result = phone_converse({
+  goal: "通知快递明天到",
+  info_keys: "收到通知",
+  context: "SF12345，收件人刘女士"
+})
 
-phone_speak("您好，确认一下周六出席吗？")
+// 模式 2: 确认收集（多轮对话）
+result = phone_converse({
+  goal: "确认周六活动出席和饮食",
+  info_keys: "出席,饮食",
+  context: "活动下午3点开始，对方之前表示可能来"
+})
 
-result = phone_ask("饮食有什么要求？", "出席,饮食",
-    context="第三轮确认，对方之前表示可能来")
-// 返回: {"info": {"出席": "是", "饮食": "素菜"}, "transcript": "..."}
-
-// 基于 transcript 做总结
-summary = f"用户{result['info']['出席']}参加，饮食要求{result['info']['饮食']}"
-
-phone_filler("bye")
-phone_hangup()
+// Agent 拿到 transcript 自己总结
+for (const t of result.transcripts) {
+  console.log(`问: ${t.agent}\n答: ${t.caller}`)
+}
 ```
 
 ## VAD 工作原理
 
-`phone_listen_vad.py` 使用 WebRTC VAD 实时检测语音活动：
+`phone_listen_vad.py` + WebRTC VAD：
 
-1. `parecord --raw` 输出 8kHz PCM 到 stdout
-2. 每 30ms 一帧送 VAD 判断 speech/silence
-3. 首次检测到 speech → 开始累积
-4. 连续 silence 达 `silence_sec`（默认 0.8s）→ 停止
-5. 写 WAV 文件返回
+1. `parecord --raw` 输出 8kHz PCM
+2. 每 30ms 一帧送 VAD
+3. 检测到 speech → 开始累积
+4. 连续 silence 0.8s → 停止
+5. 写 WAV 返回
 
 ## 关键技术决策
 
-- **蓝牙 HSP 而非扬声器**：数字通路无回声，对方听到的是干净 TTS
-- **本地 TTS 优先**：espeak-ng 21ms 生成，100x 快于云端 edge-tts
-- **本地 LLM 优先**：qwen2.5-1.5B GGUF 本地推理，500ms 延迟，无网络依赖
-- **双层上下文**：系统预设身份 + Agent 每次调用传入任务上下文，合并生效
-- **transcript 透传**：Agent 可基于原始通话文本总结，不受 LLM 提取偏差影响
-- **8kHz 窄带**：HSP 协议限制，ASR 对同音字有偏差但上下文可纠正
-- **filler 预生成**：零延迟垫话，消除 TTS 生成的 2-5s 对话间隔
-- **VAD 自适应收声**：对方说 0.5s 录 1.3s，不说就不白等
-- **隔离 LLM 上下文**：来电文本不进入 Agent 上下文，防提示注入
-- **faster-whisper small**：本地 ASR，HF_HUB_OFFLINE 避免代理干扰
-- **回声自动清理**：HSP 激活时自动卸载 PulseAudio loopback 模块，消除数字回声
+- **蓝牙 HSP**：数字通路无回声
+- **API 驱动对话**：DeepSeek 做方向盘，1.5B 本地做简单提取，各司其职
+- **双层上下文**：系统预设 + 每次调用传入，模型自动合并
+- **四层停止**：模型判停 + 关键词 + 重复检测 + max，防止死循环
+- **TTS 后台生成**：录音结束立即后台生成 TTS，不阻塞
+- **filler 智能播放**：超 2s 才播，播完才说话，不打断
+- **回声 5 次重试清理**：module-bluetooth-policy 自动创建 loopback，每次 paplay 前强制清除
 - **蓝牙断连自动重连**：`ensure_hsp()` 内部 `bluetoothctl connect` + 重设 profile
-- **零硬编码路径**：所有路径通过环境变量注入，仓库可跨机器部署
+- **HSP 拨号前检查**：`phone_dial` 先走 `ensure_hsp()`，连不上不拨号
+- **通话状态取最高值**：`dumpsys` 多状态行时取最大，避免误判
+- **transcript 双端记录**：返回 `{agent, caller}` 对，Agent 看到完整对话
+- **whisper tiny**：速度优先，1-3s 转写
+- **零硬编码路径**：全部通过环境变量注入
+- **98% 停止准确率**：184 条多场景对话测试验证
