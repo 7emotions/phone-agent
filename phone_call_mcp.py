@@ -265,12 +265,24 @@ async def asr_16khz(wav_8khz: str) -> str:
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
         env=clean_env())
     await proc.wait()
-    txt = upsampled.rsplit(".", 1)[0] + ".txt"
-    result = open(txt).read().strip() if os.path.exists(txt) else ""
+    base = upsampled.rsplit(".", 1)[0]
+    # whisper may output .json regardless of --output_format flag
+    for ext in [".txt", ".json"]:
+        path = base + ext
+        if os.path.exists(path):
+            content = open(path).read().strip()
+            os.remove(path)
+            if ext == ".json":
+                try:
+                    data = json.loads(content)
+                    texts = [s["text"].strip() for s in data.get("segments", [])]
+                    content = "".join(texts)
+                except Exception:
+                    content = ""
+            os.remove(upsampled)
+            return content
     os.remove(upsampled)
-    if os.path.exists(txt):
-        os.remove(txt)
-    return result
+    return ""
 
 
 async def record_vad(max_sec: int, silence_sec: float) -> str | None:
