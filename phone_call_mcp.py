@@ -362,6 +362,12 @@ async def converse(goal: str, info_keys: str, max_turns: int = 5, call_context: 
         if action.get("action") == "done":
             break
 
+        if len(transcripts) >= 2:
+            prev = transcripts[-1].get("caller", "")
+            curr = transcripts[-2].get("caller", "")
+            if prev and curr and len(set(prev) & set(curr)) / max(len(prev), 1) > 0.6:
+                break  # caller repeating themselves, conversation done
+
         tts_task = asyncio.create_task(tts_8khz(action.get("text", "")))
 
         try:
